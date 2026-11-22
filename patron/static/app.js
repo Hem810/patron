@@ -65,7 +65,7 @@ function competitors(v) {
       return `<td><span class="tag ${c.status}">${CHECK[c.status]}</span></td>`;
     }).join("")}</tr>`).join("")}</table></div>
     ${r.links.map((x) => `<p><span class="tag ${x.strength}">${esc(x.strength)}</span>
-      ${esc(nameOf(x.lab)?.institution)} and ${esc(x.rival)}, ${esc(x.scope)} level
+      ${esc(nameOf(x.lab)?.institution)} and ${esc(x.rival)}, ${esc(x.scope)} level ${esc(x.reason)}
       <blockquote>${esc(x.passage)}<br>${out(x.url, x.source)} · ${esc(x.field)} · ${esc(x.date || "date not stated")}
       · retrieved ${esc(x.retrieved_at)}</blockquote></p>`).join("")}</div>`;
 }
@@ -110,7 +110,7 @@ function approval(v) {
     <input id="approver" type="text" placeholder="Name of the approver" aria-label="Name of the approver">
     <div class="row"><button data-do="approve">Approve and send to sandbox</button>
       <button class="no" data-do="reject">Reject</button></div>
-    <div class="mute">Approval binds to packet ${esc(v.packet.sha.slice(0, 12))}.</div></div>`;
+    <div class="mute">Goes to ${esc(v.packet.email?.to)}. Approval binds to packet ${esc(v.packet.sha.slice(0, 12))}.</div></div>`;
 }
 
 function unknowns(v) {
@@ -123,6 +123,7 @@ function side(v, history) {
     const c = v.cost, n = v.counts;
     if (v.brief) html += `<div class="card"><h3>What I understood</h3><p>${esc(v.brief.problem)}</p>
       <div class="mute">Company: ${esc(v.brief.client || "not named")}<br>Budget: ${inr(v.brief.budget_inr)}<br>
+      ${(v.brief.notes || []).map((n) => `<b>${esc(n)}</b><br>`).join("")}
       Competitors: ${esc(v.brief.rivals.join(", ") || "none named")}</div>
       ${n.searched ? `<p class="mute">${n.searched} papers searched since ${esc(n.since)}, ${n.screened ?? "…"} screened, ${n.relevant ?? "…"} on topic.</p>
       <details data-k="phrases"><summary>Search terms used</summary>${list(n.phrases)}</details>` : ""}</div>`;

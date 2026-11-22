@@ -395,7 +395,9 @@ class Durable(unittest.TestCase):
     def test_proposal_escapes_hostile_text(self):
         _, built = self.waiting()
         built["lab"]["name"] = "<script>alert(1)</script>"
-        self.assertNotIn("<script>", packet.render(built))
+        out = packet.compose(built)
+        self.assertIn("&lt;script&gt;", out)
+        self.assertNotIn("<script>", out)
 
 
 if __name__ == "__main__":

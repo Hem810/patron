@@ -3,6 +3,7 @@ import html
 
 from .text import digest, fold
 
+HASH_SLOT = "{{packet-hash}}"
 CSS = """body{font:15px/1.55 -apple-system,Segoe UI,sans-serif;max-width:820px;margin:40px auto;padding:0 20px;color:#17211c}
 h1{line-height:1.15}h2{margin-top:30px;border-bottom:1px solid #cbd5ce;padding-bottom:4px}
 table{border-collapse:collapse;width:100%}td,th{text-align:left;vertical-align:top;padding:7px;border-bottom:1px solid #e2e8e4}
@@ -85,8 +86,28 @@ def build(brief, ranked, rival_check, decision, cfg, unknowns, *, offer_inr=None
         "disclosures": disclosure_questions(pick, links, industry),
         "unknowns": unknowns, "agreement": rules,
     }
-    body["sha"] = digest(body)
+    body["email"] = {
+        "to": cfg["sandbox_recipient"],
+        "subject": f"Research sponsorship proposal for {pick['institution']}",
+        "text": "The proposal and draft agreement are attached.",
+    }
+    body["document"] = compose(body)  # the approved bytes: wording, terms and evidence, not just the data
+    body["sha"] = fingerprint(body)
     return body
+
+
+def fingerprint(p):
+    return digest({key: value for key, value in p.items() if key != "sha"})
+
+
+def sealed(p):
+    return bool(p and p.get("document") and p.get("email")) and fingerprint(p) == p.get("sha")
+
+
+def render(p):
+    """Exactly the document that was hashed, with its own hash printed on it."""
+    return (p.get("document") or compose(p)).replace(
+        HASH_SLOT, p.get("sha", "")[:12])
 
 
 def link(url, label):
@@ -95,7 +116,7 @@ def link(url, label):
     return f'<a href="{html.escape(url)}">{html.escape(label)}</a>'
 
 
-def render(p):
+def compose(p):
     e = lambda value: html.escape(str(value if value is not None else ""))
     lab, b, rules, brief = p["lab"], p["budget"], p["agreement"], p["brief"]
     sponsor = brief["client"] or "[Sponsor legal name]"
@@ -109,7 +130,7 @@ def render(p):
         return "".join(
             f"<li>{e(x['strength'].title())}, {e(x['scope'])} level: "
             f"<span class=quote>{e(x['passage'])}</span> "
-            f"({link(x['url'], x['source'])}, {e(x['date'] or 'date not stated')}, {e(x['id'])})</li>"
+            f"({link(x['url'], x['source'])}, {e(x['date'] or 'date not stated')}, {e(x['id'])}) {e(x.get('reason', ''))}</li>"
             for x in records
         )
 
@@ -153,7 +174,7 @@ def render(p):
     return f"""<!doctype html><html lang=en><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1"><title>Research sponsorship proposal</title>
 <style>{CSS}</style>
-<p>Research sponsorship proposal, packet {p['sha'][:12]}</p>
+<p>Research sponsorship proposal, packet {HASH_SLOT}</p>
 <h1>{e(lab['name'])}, {e(lab['institution'])}</h1>
 <p>For {e(sponsor)}. Problem: {e(brief['problem'])}</p>
 <p class=note>Draft for human review. A public-record match does not establish capacity, willingness or the absence

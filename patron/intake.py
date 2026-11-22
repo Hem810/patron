@@ -1,7 +1,7 @@
 """Turn a customer's words into a brief. Names and money must appear in the customer's text."""
 import re
 
-from . import llm
+from . import llm, money
 from .text import clean, fold, mentions, stems
 
 SCHEMA = {
@@ -34,25 +34,12 @@ STOP = set("""a an the and or of to for in on with our we us is are be can who s
 lab labs help make want need have has company budget india indian rs inr lakh lakhs lac crore cr please find which
 under where that this it from by at as into their they i me my best compete competitors competitor rivals rival
 make making better improve last longer using use study work works working""".split())
-MONEY = re.compile(
-    r"(₹|\brs\.?|\binr\b)?\s*(\d[\d,]*(?:\.\d+)?)\s*(lakhs?\b|lacs?\b|crores?\b|cr\b|million\b|k\b)?", re.I)
 RIVAL = re.compile(
     r"(?:compet(?:e|es|ing) (?:with|against)|(?:competitors?|rivals?)(?: are| is|:| include))\s+([^.;!?\n]+)", re.I)
 
 
 def budget(text):
-    for symbol, number, unit in MONEY.findall(text):
-        unit = unit.lower()
-        if not symbol and not unit.startswith(("lakh", "lac", "crore")):
-            continue
-        scale = (1e5 if unit.startswith(("lakh", "lac")) else
-                 1e7 if unit.startswith("cr") else
-                 1e6 if unit == "million" else
-                 1e3 if unit == "k" else 1)
-        amount = round(float(number.replace(",", "")) * scale)
-        if amount > 0:
-            return amount
-    return None
+    return money.read(text)[0]
 
 
 def named_rivals(text):
@@ -71,12 +58,7 @@ def technical_text(request, names):
     for name in sorted(filter(None, names), key=len, reverse=True):
         text = re.sub(rf"(?<!\w){re.escape(name)}(?!\w)", "[company]", text, flags=re.I)
 
-    def hide_money(found):
-        symbol, _, unit = found.groups()
-        is_money = symbol or (unit or "").lower().startswith(("lakh", "lac", "crore"))
-        return " [budget] " if is_money else found.group(0)
-
-    text = MONEY.sub(hide_money, text)
+    text = money.hide(text)
     kept = []
     for part in re.split(r"(?<=[.!?;])\s+", text):
         if "[company]" in part or "[budget]" in part:
@@ -137,9 +119,9 @@ def parse(client, request):
         group = [clean(t) for t in group if isinstance(t, str) and fold(t)]
         if group and any(stems(t) <= asked for t in group):
             essentials.append(list(dict.fromkeys(group))[:6])
-    amount = budget(request)
-    if amount is None:
-        notes.append("No budget in rupees was given, so milestones show percentages only.")
+    amount, unclear = money.read(request)
+    if unclear:
+        notes.append(unclear)
     if not rivals:
         notes.append("No competitors were named, so competitor conflicts were not checked.")
     return {

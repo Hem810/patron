@@ -100,10 +100,13 @@ class Client:
                               (float(used) if used else credits, tokens, int((time.monotonic() - start) * 1000), row))
                 return parsed, stamp
             except urllib.error.HTTPError as err:
-                store.run("update ledger set outcome='error', credits=0, detail=?, ms=? where id=?",
-                          f"HTTP {err.code}", int((time.monotonic() - start) * 1000), row)
+                # A paid request that got a 408 or 5xx may have been billed. Only a 429 is known not to have been.
+                unknown = bool(credits) and (err.code == 408 or err.code >= 500)
+                store.run("update ledger set outcome=?, credits=?, detail=?, ms=? where id=?",
+                          "unknown" if unknown else "error", credits if unknown else 0, f"HTTP {err.code}",
+                          int((time.monotonic() - start) * 1000), row)
                 problem = f"{service}: HTTP {err.code}"
-                if err.code in RETRYABLE:
+                if err.code in RETRYABLE and (not credits or err.code == 429):
                     reset = err.headers.get("X-RateLimit-Reset") or err.headers.get("Retry-After")
                     wait = float(reset) if reset and reset.isdigit() else 1.5 * (attempt + 1)
             except (OSError, ValueError, http.client.HTTPException) as err:
