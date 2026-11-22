@@ -184,7 +184,7 @@ def resolve(client, brief, request=""):
     """Map each competitor to one company and check a company named twice only once."""
     given = brief["rivals"]
     if not crustdata.enabled() or not given:
-        return [{"name": n, "search": n} for n in given], [], []
+        return [{"name": n, "search": n, "identity": "not_checked"} for n in given], [], []
     sector = next((w for w in SECTORS if mentions(request + " " + brief.get("problem", ""), w)), None)
     records, notes, keep, seen = [], [], [], set()
     for name in given:
@@ -212,7 +212,7 @@ def resolve(client, brief, request=""):
             could_be = ", ".join(dict.fromkeys(m["name"] for m in matches[:3] if m["name"]))
             hint = f" It could be {could_be}. Give the full legal name to settle it." if could_be else ""
             notes.append(f"Cannot verify which company '{name}' is.{hint} Searched by the name as given.")
-        keep.append({"name": name, "search": search})
+        keep.append({"name": name, "search": search, "identity": "resolved" if match else "unresolved"})
     return keep, records, notes
 
 
@@ -396,7 +396,9 @@ def check(client, brief, found, ranked, request=""):
         for paper in {p["doi"]: p for p in pool}.values():
             links += from_papers(paper, labs, rival["name"])
         for lab in labs:
-            checks.append({"lab": lab["key"], "rival": rival["name"], "papers": paper_ok, "announcements": False})
+            checks.append({"lab": lab["key"], "rival": rival["name"], "papers": paper_ok,
+                           "announcements": False, "announcement_sources": [],
+                           "identity": rival["identity"]})
 
     searched = set()
     if crustdata.enabled():
@@ -411,6 +413,8 @@ def check(client, brief, found, ranked, request=""):
         elsewhere = rival_ties(docs, names, topic)
         for c in checks:
             c["announcements"] = ("rival", c["rival"]) in searched and ("lab", c["lab"]) in searched
+            if c["announcements"]:
+                c["announcement_sources"].append("Crustdata web search")
 
     # Headlines are the fallback, with no key or when a web search failed.
     by_key = {lab["key"]: lab for lab in labs}
@@ -424,13 +428,18 @@ def check(client, brief, found, ranked, request=""):
                 notes.append(f"Announcements for {by_key[c['lab']]['institution']} and {c['rival']}: not checked ({err}).")
                 continue
             c["announcements"] = True
+            c["announcement_sources"].append("Google News headlines")
             links += found_links
 
+    unresolved = {rival["name"] for rival in names if rival["identity"] == "unresolved"}
+    links = [{**item, "strength": "lead", "identity": "unresolved"}
+             if item["rival"] in unresolved else item for item in links]
     for c in checks:
         mine = [x for x in links if x["lab"] == c["lab"] and x["rival"] == c["rival"]]
         c["status"] = ("link_found" if any(x["strength"] == "confirmed" for x in mine) else
                        "lead_only" if mine else
-                       "none_found" if c["papers"] and c["announcements"] else "not_checked")
+                       "none_found" if c["papers"] and c["announcements"] and c["identity"] != "unresolved"
+                       else "not_checked")
         c["checked_at"] = now()
     unique = {x["id"]: x for x in links}
     return {"rivals": [n["name"] for n in names], "companies": companies, "links": list(unique.values()),

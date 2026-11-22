@@ -16,10 +16,13 @@ def decide(ranked, rival_check, cfg, chosen_key=None):
         return None
     since = str(date.today().year - cfg["years"])
 
+    def direct_links(lab):
+        return [x for x in rival_check["links"]
+                if x["lab"] == lab["key"] and x["strength"] == "confirmed"
+                and x["scope"] == "person" and x["date"] and x["date"][:4] >= since]
+
     def personal(lab):
-        return sorted({x["rival"] for x in rival_check["links"]
-                       if x["lab"] == lab["key"] and x["strength"] == "confirmed" and x["scope"] == "person"
-                       and (not x["date"] or x["date"][:4] >= since)})
+        return sorted({x["rival"] for x in direct_links(lab)})
 
     clear = [lab for lab in labs if not personal(lab)]
     pick = next((lab for lab in labs if lab["key"] == chosen_key), None) or (clear or labs)[0]
@@ -27,11 +30,13 @@ def decide(ranked, rival_check, cfg, chosen_key=None):
     others.sort(key=lambda lab: bool(personal(lab)))
 
     reasons = [counted(pick["counts"][k], k) for k in LABELS if pick["counts"][k]]
+    selection_evidence = []
     if chosen_key:
         reasons.insert(0, "chosen by the approver instead of the first recommendation")
     elif pick["key"] != labs[0]["key"]:
         reasons.insert(0, f"{labs[0]['name']} scored higher but has a direct public link to "
                           f"{', '.join(personal(labs[0]))}, so ask them before funding")
+        selection_evidence = direct_links(labs[0])
 
     margin = cfg["ranking"]["close_call_points"]
     close = [lab for lab in others if not personal(lab) and abs(pick["score"] - lab["score"]) <= margin]
@@ -67,4 +72,5 @@ def decide(ranked, rival_check, cfg, chosen_key=None):
     thin = pick["counts"]["fit"] < 4 or not pick["orcid"]
     return {"pick": pick["key"], "backups": [lab["key"] for lab in others[:2]], "reasons": reasons,
             "why_not": why_not, "questions": list(dict.fromkeys(questions)),
+            "selection_evidence": selection_evidence,
             "confidence": "limited" if thin else "close call" if close else "good", "overridden": bool(chosen_key)}
