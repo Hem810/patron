@@ -1,7 +1,7 @@
 """The finished work: proposal, milestones, budget and draft agreement. Templates only, no model-written facts."""
 import html
 
-from .text import digest
+from .text import digest, fold
 
 CSS = """body{font:15px/1.55 -apple-system,Segoe UI,sans-serif;max-width:820px;margin:40px auto;padding:0 20px;color:#17211c}
 h1{line-height:1.15}h2{margin-top:30px;border-bottom:1px solid #cbd5ce;padding-bottom:4px}
@@ -38,16 +38,51 @@ def money(total, rules):
     return {"total": total, "research": research, "overhead": overhead, "milestones": rows}
 
 
-def build(brief, ranked, rival_check, decision, cfg, unknowns):
+def disclosure_questions(lab, links, industry):
+    groups = {}
+    for item in links:
+        groups.setdefault(item["rival"], []).append(item)
+
+    disclosures = []
+    for rival, evidence in sorted(groups.items()):
+        confirmed = any(item["strength"] == "confirmed" for item in evidence)
+        subject = "The public record reports a relationship" if confirmed else "A public search surfaced a possible link"
+        disclosures.append({
+            "id": "D" + digest([lab["key"], "competitor", fold(rival)])[:12],
+            "question": (f"{subject} involving {rival}. Does any active work overlap this proposal "
+                         "or restrict what the lab can share?"),
+            "evidence_ids": sorted({item["id"] for item in evidence}),
+        })
+    if industry:
+        disclosures.append({
+            "id": "D" + digest([lab["key"], "industry"])[:12],
+            "question": "Does any of the reported industry work at this institute overlap the proposed research?",
+            "evidence_ids": sorted({item["id"] for item in industry}),
+        })
+    return disclosures
+
+
+def build(brief, ranked, rival_check, decision, cfg, unknowns, *, offer_inr=None):
     by_key = {lab["key"]: lab for lab in ranked["labs"]}
     pick = by_key[decision["pick"]]
     rules = cfg["agreement"]
+    ceiling = brief["budget_inr"]
+    if offer_inr is not None and (type(offer_inr) is not int or
+                                  type(ceiling) is not int or not 0 < offer_inr <= ceiling):
+        raise ValueError("The proposed offer must be a positive amount within the sponsor's rupee ceiling.")
+    amount = offer_inr if offer_inr is not None else ceiling
+    budget = money(amount, rules)
+    links = [x for x in rival_check["links"] if x["lab"] == pick["key"]]
+    industry = [x for x in rival_check.get("industry", []) if x["lab"] == pick["key"]]
     body = {
         "brief": brief, "lab": pick, "backups": [by_key[k] for k in decision["backups"]], "decision": decision,
-        "budget": money(brief["budget_inr"], rules),
+        "budget": budget,
+        "offer": {"amount_inr": amount, "ceiling_inr": ceiling, "term_months": 12,
+                  "sandbox_recipient": cfg["sandbox_recipient"]} if amount is not None else None,
         "checks": [c for c in rival_check["checks"] if c["lab"] == pick["key"]],
-        "links": [x for x in rival_check["links"] if x["lab"] == pick["key"]],
-        "industry": [x for x in rival_check.get("industry", []) if x["lab"] == pick["key"]],
+        "links": links,
+        "industry": industry,
+        "disclosures": disclosure_questions(pick, links, industry),
         "unknowns": unknowns, "agreement": rules,
     }
     body["sha"] = digest(body)
@@ -70,21 +105,50 @@ def render(p):
         f"<tr><td>{link(x['url'], x['title'])}<div class=quote>{e(x['passage'])}</div>"
         f"{link(x['record_url'], 'Record: ' + x['field'])}</td>"
         f"<td>{e(x['date'])}</td><td>{e(x['retrieved_at'][:10])}</td></tr>" for x in lab["papers"])
-    checks = "".join(f"<li><b>{e(c['rival'])}</b>: {STATUS[c['status']]} "
-                     f"(checked {e(c['checked_at'][:10])})</li>" for c in p["checks"]) \
-        or "<li>Not checked: no competitor was named.</li>"
-    links = "".join(
-        f"<li>{e(x['strength'].title())}, {e(x['scope'])} level: <span class=quote>{e(x['passage'])}</span> "
-        f"({link(x['url'], x['source'])}, {e(x['date'] or 'date not stated')})</li>" for x in p["links"])
+    def evidence_items(records):
+        return "".join(
+            f"<li>{e(x['strength'].title())}, {e(x['scope'])} level: "
+            f"<span class=quote>{e(x['passage'])}</span> "
+            f"({link(x['url'], x['source'])}, {e(x['date'] or 'date not stated')}, {e(x['id'])})</li>"
+            for x in records
+        )
+
+    checks = []
+    for check in p["checks"]:
+        coverage = []
+        if check.get("identity") == "unresolved":
+            coverage.append("Company identity unverified")
+        if "papers" in check:
+            coverage.append("Paper search completed" if check["papers"] else "Paper search incomplete")
+        if "announcement_sources" in check:
+            coverage.extend(check["announcement_sources"] or ["Announcement search incomplete"])
+        suffix = f" · {e(' · '.join(coverage))}" if coverage else ""
+        checks.append(f"<li><b>{e(check['rival'])}</b>: {STATUS[check['status']]} "
+                      f"(checked {e(check['checked_at'][:10])}){suffix}</li>")
+    checks = "".join(checks) or "<li>Not checked: no competitor was named.</li>"
+    links = evidence_items(p["links"])
+    selection = evidence_items(p["decision"].get("selection_evidence", []))
+    if selection:
+        selection = f"<h2>Evidence that changed the recommendation</h2><ul>{selection}</ul>"
     stones = "".join(f"<tr><td>Month {m['month']}</td><td>{e(m['deliverable'])}</td><td>{m['pct']}%</td>"
                      f"<td>{inr(m['amount'])}</td></tr>" for m in b["milestones"])
-    ties = "".join(
-        f"<li><span class=quote>{e(x['passage'])}</span> "
-        f"({link(x['url'], x['source'])}, {e(x['date'] or 'date not stated')})</li>" for x in p.get("industry", []))
+    ties = evidence_items(p.get("industry", []))
     if ties:
         ties = f"<h2>Other industry work reported at this institute</h2><ul>{ties}</ul>"
     backups = "".join(f"<li><b>{e(x['name'])}</b>, {e(x['institution'])}. {e(p['decision']['why_not'][x['key']])}</li>"
                       for x in p["backups"]) or "<li>No other lab met the evidence bar.</li>"
+    offer = p.get("offer")
+    offer_summary = ""
+    if offer:
+        offer_summary = (f"<h2>Proposed sponsorship offer</h2><p>{inr(offer['amount_inr'])} excluding taxes "
+                         f"for {e(offer['term_months'])} months, within the sponsor's "
+                         f"{inr(offer['ceiling_inr'])} ceiling. Subject to signatures.</p>")
+    disclosures = "".join(
+        f"<li><b>{e(item['id'])}</b> {e(item['question'])} ({e(', '.join(item['evidence_ids']))})</li>"
+        for item in p.get("disclosures", [])
+    )
+    if disclosures:
+        disclosures = f"<h2>Disclosures requested from the lab</h2><ul>{disclosures}</ul>"
 
     return f"""<!doctype html><html lang=en><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1"><title>Research sponsorship proposal</title>
@@ -100,7 +164,8 @@ of private agreements.</p>
 {e(lab['affiliation']['date'])}: {link(lab['affiliation']['url'], lab['affiliation']['text'])}</p>
 <table><tr><th>Evidence and exact field</th><th>Published</th><th>Retrieved</th></tr>{papers}</table>
 <h2>Competitor check</h2><ul>{checks}{links}</ul>
-{ties}<h2>Alternatives</h2><ul>{backups}</ul>
+{selection}{ties}<h2>Alternatives</h2><ul>{backups}</ul>
+{offer_summary}
 <h2>Budget</h2>
 <table><tr><td>Total, excluding taxes</td><td>{inr(b['total'])}</td></tr>
 <tr><td>Research</td><td>{inr(b['research'])}</td></tr>
@@ -133,5 +198,6 @@ acknowledged in every publication.</li>
 <p>Sponsor signatory: ____________________ Date: ________</p>
 <p>Institute signatory: ____________________ Date: ________</p>
 <h2>Ask before signing</h2><ul>{items(p['decision']['questions'])}</ul>
+{disclosures}
 <h2>What could not be verified</h2><ul>{items(p['unknowns'])}</ul>
 </html>"""
