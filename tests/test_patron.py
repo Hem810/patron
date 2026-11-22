@@ -45,6 +45,31 @@ class Money(unittest.TestCase):
             self.assertEqual(sum(m["amount"] for m in out["milestones"]), total)
 
 
+class Neutral(unittest.TestCase):
+    base = "We make batteries and have {m}. Who should we fund to make sodium-ion cells last longer? {c}"
+
+    def neutral(self, money, competitors, names):
+        return intake.technical_text(self.base.format(m=money, c=competitors).strip(), names)
+
+    def test_competitors_and_budget_do_not_reach_the_search(self):
+        short = self.neutral("\u20b950 lakh", "Our competitors are Acme and Kaveri.", ["Acme", "Kaveri"])
+        full = self.neutral("Rs 2 crore", "Our competitors are Acme Industries and Kaveri Energy & Mobility.",
+                            ["Acme Industries", "Kaveri Energy & Mobility"])
+        none = self.neutral("\u20b950 lakh", "", [])
+        self.assertEqual(short, full)
+        self.assertEqual(short, none)
+        self.assertIn("sodium-ion cells", short)
+        self.assertNotIn("Acme", short)
+
+    def test_problem_in_the_same_sentence_survives(self):
+        out = intake.technical_text("We compete with Acme and need to cut clinker using calcined clay.", ["Acme"])
+        self.assertIn("calcined clay", out)
+        self.assertNotIn("Acme", out)
+
+    def test_technical_numbers_are_not_hidden(self):
+        self.assertIn("5000 cycles", intake.technical_text("Cells must last 5000 cycles.", []))
+
+
 class Identity(unittest.TestCase):
     def test_institution_spellings_become_one_record(self):
         for text in (IITD, "Dept. of Civil Engineering, Indian Institute of Technology, Delhi 110016",
@@ -87,10 +112,45 @@ class Ranking(unittest.TestCase):
     def test_plural_matches_singular(self):
         self.assertTrue(ranked([paper(1), paper(2)], essentials=[["calcined clays"]])["labs"])
 
+    def test_near_tie_is_called_a_close_call(self):
+        labs = ranked([paper(n, orcid="0000-0001") for n in range(21)]
+                      + [paper(100 + n, ("Meena", "Iyer", IITM), orcid="0000-0002") for n in range(20)])
+        out = decide.decide(labs, {"links": []}, config.load())
+        self.assertEqual(out["confidence"], "close call")
+        self.assertIn("Speak to both", out["questions"][0])
+
+    def test_preprint_and_published_version_count_once(self):
+        published = paper(2)
+        preprint = {**paper(3), "title": published["title"].upper(), "doi": "10.2139/ssrn.3"}
+        labs = ranked([paper(1), published, preprint])["labs"]
+        self.assertEqual(labs[0]["counts"]["fit"], 2)
+        self.assertIn("P2", [p["id"] for p in labs[0]["papers"]])
+
+    def test_many_papers_never_tie_with_few(self):
+        big = [paper(n) for n in range(29)]
+        small = [paper(100 + n, ("Meena", "Iyer", IITM)) for n in range(10)]
+        labs = ranked(big + small)["labs"]
+        self.assertGreater(labs[0]["score"], labs[1]["score"] + 2)
+        why = decide.decide({"labs": labs}, {"links": []}, config.load())["why_not"][labs[1]["key"]]
+        self.assertIn("10 against 29", why)
+
     def test_same_input_gives_same_order(self):
         papers = [paper(1), paper(2), paper(3, ("Meena", "Iyer", IITM)), paper(4, ("Meena", "Iyer", IITM))]
         order = lambda rows: [lab["key"] for lab in ranked(rows)["labs"]]
         self.assertEqual(order(papers), order(papers[::-1]))
+
+
+class Screening(unittest.TestCase):
+    groups = [["calcined clay", "LC3"], ["clinker"]]
+
+    def test_exact_subject_is_kept_by_rule(self):
+        self.assertTrue(papers.names_subject("Workability of limestone calcined clays cement", self.groups))
+
+    def test_ambiguous_acronym_is_left_to_screening(self):
+        self.assertFalse(papers.names_subject("LC3 lipidation in autophagy", self.groups))
+
+    def test_scattered_words_are_not_the_subject(self):
+        self.assertFalse(papers.names_subject("Clay tiles and calcined bauxite", self.groups))
 
 
 class Unprinted(unittest.TestCase):
@@ -198,6 +258,26 @@ class LiveShapes(unittest.TestCase):
     def test_joined_fragments_are_not_one_sentence(self):
         text = "Samplerail signs MoU with IIT Delhi ... Acmecrete Cement Ltd"
         self.assertEqual(rivals.read_passage(text, Rivals.lab, "Acmecrete")[0], None)
+
+    def test_relative_snippet_date(self):
+        at = "2026-11-22T10:00:00+00:00"
+        self.assertEqual(rivals.snippet_day("2 days ago \u2014 MoU signed", at), "2026-11-20")
+
+    def test_title_does_not_cut_a_quote(self):
+        text = "Acmecrete will fund the Dr. Rao Chair at IIT Delhi."
+        self.assertEqual(rivals.read_passage(text, Rivals.lab, "Acmecrete")[1], text.rstrip("."))
+
+    def test_menu_does_not_join_a_sentence(self):
+        html = "<li>Acmecrete</li><li>Bookmark</li><p>IIT Delhi signed an MoU with Samplerail.</p>"
+        self.assertEqual(rivals.read_passage(rivals.page_text(html), Rivals.lab, "Acmecrete")[0], None)
+
+    def test_ambiguous_company_names_the_candidates(self):
+        found = ([{"id": 1, "name": "Example Life", "confidence": 0.8},
+                  {"id": 2, "name": "Example Industries", "confidence": 0.8}], "t")
+        with mock.patch.object(crustdata, "enabled", return_value=True), \
+                mock.patch.object(crustdata, "identify", return_value=found):
+            _, _, notes = rivals.resolve(None, {"rivals": ["Example"], "problem": "x"})
+        self.assertIn("Example Life, Example Industries", notes[0])
 
     def test_english_snippet_date(self):
         self.assertEqual(rivals.snippet_day("May 14, 2025 \u2014 Testbed"), "2025-05-14")

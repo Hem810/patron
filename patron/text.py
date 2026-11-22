@@ -29,10 +29,19 @@ def fold(value):
     return re.sub(r"[^a-z0-9]+", " ", value.replace("&", " and ")).strip()
 
 
+def stem_list(value):
+    words = fold(value).split()
+    return [(w[:-1] if len(w) > 3 and w.endswith("s") else w)[:6] for w in words]
+
+
 def stems(value):
     """Crude word stems, so 'clays' matches 'clay' and 'emissions' matches 'emission'."""
-    words = fold(value).split()
-    return {(w[:-1] if len(w) > 3 and w.endswith("s") else w)[:6] for w in words}
+    return set(stem_list(value))
+
+
+def has_phrase(value, phrase):
+    """The phrase's words, adjacent and in order."""
+    return f" {' '.join(stem_list(phrase))} " in f" {' '.join(stem_list(value))} "
 
 
 def mentions(haystack, name):

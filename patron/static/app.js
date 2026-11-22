@@ -41,7 +41,7 @@ function recommendation(v) {
   return `<div class="card pick">
     <div class="mute">Fund this lab</div>
     <h2>${esc(l.name)}, ${esc(l.institution)}</h2>
-    <span class="tag ${esc(p.decision.confidence)}">${esc(p.decision.confidence)} evidence</span>
+    <span class="tag ${esc(p.decision.confidence)}">${p.decision.confidence === "close call" ? "close call: speak to both" : esc(p.decision.confidence) + " evidence"}</span>
     ${list(p.decision.reasons)}
     <p>${inr(b.total)} total: ${inr(b.research)} research, ${inr(b.overhead)} overhead.
       <a href="/proposal/${esc(v.job.id)}" target="_blank" rel="noopener">Read the proposal and agreement</a></p>

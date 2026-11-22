@@ -33,8 +33,14 @@ def decide(ranked, rival_check, cfg, chosen_key=None):
         reasons.insert(0, f"{labs[0]['name']} scored higher but has a direct public link to "
                           f"{', '.join(personal(labs[0]))}, so ask them before funding")
 
+    margin = cfg["ranking"]["close_call_points"]
+    close = [lab for lab in others if not personal(lab) and abs(pick["score"] - lab["score"]) <= margin]
     why_not = {}
     for lab in others:
+        if lab in close:
+            why_not[lab["key"]] = (f"Too close to call ({lab['score']} against {pick['score']}). "
+                                   "Speak to both before funding.")
+            continue
         linked = personal(lab)
         if linked:
             why_not[lab["key"]] = f"Direct public link to {', '.join(linked)}. A question to ask, not proof of a conflict."
@@ -44,7 +50,8 @@ def decide(ranked, rival_check, cfg, chosen_key=None):
         why_not[lab["key"]] = ("Fewer " + " and ".join(behind[:2]) + ".") if behind \
             else "Close on this evidence. A reasonable alternative."
 
-    questions = []
+    questions = [f"{lab['name']} at {lab['institution']} is within {margin} points of this choice. "
+                 "Speak to both before funding." for lab in close]
     for link in rival_check["links"]:
         if link["lab"] != pick["key"]:
             continue
@@ -52,12 +59,12 @@ def decide(ranked, rival_check, cfg, chosen_key=None):
         who = pick["name"] if link["scope"] == "person" else pick["institution"]
         questions.append(f"{who} {verb} {link['rival']}. Ask about active projects, overlap and confidentiality.")
     if any(x["lab"] == pick["key"] for x in rival_check.get("industry", [])):
-        questions.append(f"{pick['institution']} has other published industry work in this area. "
-                         "Ask who funds it and who owns the results.")
+        questions.append(f"{pick['institution']} has other reported industry work. "
+                         "Ask whether it overlaps this problem, who funds it and who owns the results.")
     questions += [f"Does {pick['name']} still lead this work at {pick['institution']}, with capacity for 12 months?",
                   "Is any part of this problem already funded, patented or promised to another sponsor?"]
 
     thin = pick["counts"]["fit"] < 4 or not pick["orcid"]
     return {"pick": pick["key"], "backups": [lab["key"] for lab in others[:2]], "reasons": reasons,
             "why_not": why_not, "questions": list(dict.fromkeys(questions)),
-            "confidence": "limited" if thin else "good", "overridden": bool(chosen_key)}
+            "confidence": "limited" if thin else "close call" if close else "good", "overridden": bool(chosen_key)}

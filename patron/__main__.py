@@ -11,7 +11,7 @@ def show(job):
     print(f"job {job}: {v['job']['status']} {v['job']['message']}")
     p = v["packet"]
     if p:
-        print(f"fund: {p['lab']['name']}, {p['lab']['institution']} ({p['decision']['confidence']} evidence)")
+        print(f"fund: {p['lab']['name']}, {p['lab']['institution']} (evidence: {p['decision']['confidence']})")
         for reason in p["decision"]["reasons"]:
             print(f"  - {reason}")
         for lab in p["backups"]:

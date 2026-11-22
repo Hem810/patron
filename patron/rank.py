@@ -3,7 +3,7 @@ from collections import defaultdict
 from datetime import date
 
 from . import identity
-from .text import stems
+from .text import fold, stems
 
 
 def appearances(papers, country):
@@ -58,6 +58,20 @@ def group_people(rows):
     return groups
 
 
+PREPRINT = ("10.2139/", "10.26434/", "10.21203/", "10.1101/", "10.48550/", "10.36227/", "10.22541/", "10.20944/")
+
+
+def one_per_work(rows):
+    """One row per work, preferring the published version and a printed affiliation."""
+    best = {}
+    for row in sorted(rows, key=lambda r: r["paper"]["id"]):
+        work = "".join(fold(row["paper"]["title"]).split())
+        worth = (not row["paper"]["doi"].startswith(PREPRINT), row["printed"])
+        if work not in best or worth > best[work][0]:
+            best[work] = (worth, row)
+    return [row for _, row in best.values()]
+
+
 def covers(titles, group):
     for title in titles:
         have = stems(title)
@@ -86,8 +100,7 @@ def rank(papers, screened, cfg, today=None, essentials=(), keep=8):
     if uncovered:
         return {"labs": [], "relevant_papers": len(relevant), "people_below_bar": len(groups), "uncovered": uncovered}
     for key, rows in groups.items():
-        unique = {r["paper"]["id"]: r for r in rows}
-        rows = sorted(unique.values(), key=lambda r: (r["paper"]["date"] or "", r["paper"]["id"]), reverse=True)
+        rows = sorted(one_per_work(rows), key=lambda r: (r["paper"]["date"] or "", r["paper"]["id"]), reverse=True)
         counts = {
             "fit": len(rows),
             "lead": sum(r["lead"] for r in rows),
@@ -102,7 +115,9 @@ def rank(papers, screened, cfg, today=None, essentials=(), keep=8):
         if essentials and not any(covers([r["paper"]["title"] for r in rows], g) for g in essentials):
             rejected += 1
             continue
-        parts = {k: round(w * min(1, counts[k] / rules["saturate"][k]), 1) for k, w in rules["weights"].items()}
+        # n / (n + half) keeps rising: more evidence always scores higher, by less each time, with no ceiling to tie at.
+        parts = {k: round(w * counts[k] / (counts[k] + rules["half_credit_at"][k]), 2)
+                 for k, w in rules["weights"].items()}
         best = max((r["author"] for r in rows), key=lambda a: len(a["given"]))
         name = f"{best['given']} {best['family']}".strip()
         cautions = []

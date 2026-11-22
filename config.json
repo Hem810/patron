@@ -3,13 +3,14 @@
   "years": 5,
   "limits": {"seconds": 240, "credits": 14, "http_calls": 90},
   "llm": {"url": "http://localhost:11434/api/chat", "model": "gemma4:latest", "timeout": 60},
-  "discovery": {"rows_per_query": 100, "screen_max": 150, "screen_batch": 30, "deep_searches": 8},
+  "discovery": {"rows_per_query": 100, "screen_max": 150, "screen_batch": 30, "deep_searches": 12, "deep_screen_max": 270},
   "ranking": {
     "min_papers": 2,
+    "close_call_points": 3,
     "min_lead_papers": 1,
     "recent_years": 2,
     "weights": {"fit": 35, "lead": 25, "recent": 20, "grants": 10, "industry": 10},
-    "saturate": {"fit": 6, "lead": 4, "recent": 3, "grants": 2, "industry": 1}
+    "half_credit_at": {"fit": 5, "lead": 4, "recent": 3, "grants": 3, "industry": 1}
   },
   "rivals": {"labs_checked": 3, "max_rivals": 3, "max_page_fetches": 3},
   "agreement": {

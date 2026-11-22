@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 from . import identity, llm
 from .net import SourceError
-from .text import clean, digest, fold, stems
+from .text import clean, digest, fold, has_phrase, stems
 
 API = "https://api.crossref.org/works"
 SELECT = "DOI,title,author,funder,issued,URL,updated-by,score"
@@ -165,7 +165,7 @@ def deepen(client, brief, found, screened):
         subjects = sum(rank.covers(titles, group) for group in essentials)
         main = bool(essentials) and rank.covers(titles, essentials[0])
         position = max(by_id[p["id"]].get("rank", 0) for p in lab["papers"])
-        return (-min(lab["counts"]["fit"], 2), -main, -subjects, -position, lab["key"])
+        return (-lab["counts"]["fit"], -lab["counts"]["lead"], -main, -subjects, -position, lab["key"])
 
     seeds = sorted(rank.rank(found["papers"], screened, loose, keep=1000)["labs"], key=promise)
     seeds = seeds[: client.cfg["discovery"]["deep_searches"]]
@@ -194,8 +194,13 @@ def deepen(client, brief, found, screened):
                             old["joined"] = fresh["joined"]
             except SourceError as err:
                 notes.append(f"Deeper search for {lab['name']} was not completed ({err}).")
-    added = sorted(new.values(), key=lambda p: p["doi"])
-    verdict = screen(client, brief, {"papers": added})
+    subject = set().union(*(stems(t) for t in brief["phrases"] + [t for group in essentials for t in group]))
+    added = sorted(new.values(), key=lambda p: (-len(subject & stems(p["title"])), p["doi"]))
+    cap = client.cfg["discovery"]["deep_screen_max"]
+    verdict = screen(client, brief, {"papers": added}, cap)
+    if len(added) > cap:
+        notes.append(f"{len(added) - cap} papers from the researcher searches, the least related by title, "
+                     "were not screened.")
     return {"papers": found["papers"] + added, "relevant": screened["relevant"] + verdict["relevant"],
             "retracted": screened["retracted"] + verdict["retracted"], "added": len(added),
             "notes": notes + verdict["notes"]}
@@ -210,9 +215,20 @@ def term_match(title, phrases):
     return False
 
 
-def screen(client, brief, found):
+def names_subject(title, essentials):
+    """On topic by rule, so a small model cannot drop it.
+
+    Either the title names two of the essential subjects, or the request has several subjects and the title carries
+    the first one word for word. Single words are excluded: 'LC3' is also a protein.
+    """
+    if sum(any(stems(term) <= stems(title) for term in group) for group in essentials) >= 2:
+        return True
+    return len(essentials) >= 2 and any(has_phrase(title, term) for term in essentials[0] if len(term.split()) >= 2)
+
+
+def screen(client, brief, found, limit=None):
     cfg = client.cfg["discovery"]
-    live = [p for p in found["papers"] if not p["retracted"]][: cfg["screen_max"]]
+    live = [p for p in found["papers"] if not p["retracted"]][: limit or cfg["screen_max"]]
     size = cfg["screen_batch"]
     batches = [live[i:i + size] for i in range(0, len(live), size)]
     system = (
@@ -235,9 +251,7 @@ def screen(client, brief, found):
         else:
             chosen = {n for n in verdict.get("relevant", []) if isinstance(n, int)}
             for i, paper in enumerate(batch, 1):
-                # A title naming two essential subjects is on topic even if the model skipped it.
-                named = sum(any(stems(t) <= stems(paper["title"]) for t in group) for group in essentials)
-                if i in chosen or named >= 2:
+                if i in chosen or names_subject(paper["title"], essentials):
                     keep.append(paper["id"])
     notes = [f"{fallback} title batch(es) used word matching because the model was unavailable."] if fallback else []
     return {"relevant": keep, "screened": len(live),
