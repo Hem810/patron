@@ -4,26 +4,62 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Patron · research sponsorship desk</title>
 <link rel="stylesheet" href="/app.css">
-<header>
-  <a class="brand" href="/">Patron</a>
-  <span>Which professor should your company fund? One request in, a signed-off proposal out.</span>
-</header>
-<main>
-  <form id="ask">
-    <label for="request">What research does your company need?</label>
-    <textarea id="request" rows="3" required maxlength="4000"
-      placeholder="Who you are, the technical problem, your budget in rupees and your competitors."></textarea>
-    <div class="row">
-      <button>Find the lab to fund</button>
-      <label class="small"><input id="fresh" type="checkbox"> run again even if it is a repeat</label>
-      <span id="note" role="status"></span>
+<body>
+<a class="skip" href="#main" data-skip>Skip to content</a>
+<div class="app">
+  <nav class="sidebar" aria-label="Requests">
+    <div class="side-top">
+      <a class="brand" href="/" data-new>
+        <svg class="logo" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3 29 10H3Z"/><path d="M6 13h3v11H6zM14.5 13h3v11h-3zM23 13h3v11h-3zM3 26h26v3H3z"/></svg>
+        <span>Patron<small>Research sponsorship desk</small></span>
+      </a>
+      <button class="menu" id="menu" type="button" aria-expanded="false" aria-controls="drawer">History</button>
     </div>
-  </form>
-  <div id="state" role="status"></div>
-  <div class="layout">
-    <section id="result"></section>
-    <aside id="side"></aside>
-  </div>
-</main>
+    <div class="drawer" id="drawer">
+      <button class="new" type="button" data-new><span aria-hidden="true">+</span> New request</button>
+      <div class="side-label">Recent requests</div>
+      <div class="history" id="history"></div>
+      <p class="side-foot">Delivers to a sandbox only.<br>No real person is contacted.</p>
+    </div>
+  </nav>
+
+  <main id="main" tabindex="-1">
+    <div class="offline" id="offline" role="alert" hidden>The server isn't answering. Unfinished work resumes when it restarts.</div>
+
+    <section class="home" id="home" hidden>
+      <p class="eyebrow">For heads of R&amp;D</p>
+      <h1>Fund the right lab,<br><em>on evidence.</em></h1>
+      <p class="lede">Describe the problem. Patron finds the professor to fund, checks whether a competitor is already there, and drafts the agreement for you to approve.</p>
+      <form class="composer" id="ask">
+        <label for="request">What research does your company need?</label>
+        <textarea id="request" rows="4" required maxlength="4000" placeholder="Who you are, the technical problem, your budget in rupees and your competitors."></textarea>
+        <div class="composer-foot">
+          <label class="check"><input id="fresh" type="checkbox"> Run again, even if it's a repeat</label>
+          <button class="primary" id="submit">Find the lab to fund <span aria-hidden="true">&rarr;</span></button>
+        </div>
+      </form>
+      <ul class="includes" aria-label="What a good request includes">
+        <li>Technical problem</li><li>Budget in rupees</li><li>Named competitors</li>
+      </ul>
+      <div class="promises">
+        <div><b>Sourced</b><p>Every paper and link opens the record behind it.</p></div>
+        <div><b>Conflict-checked</b><p>Competitor ties are quoted, or marked as unconfirmed.</p></div>
+        <div><b>Human-approved</b><p>The exact agreement you approve is sent, once.</p></div>
+      </div>
+    </section>
+
+    <section class="job" id="job" hidden>
+      <header class="jobhead" id="head"></header>
+      <div id="flow"></div>
+      <div class="grid" id="grid">
+        <div class="area-hero" id="hero"></div>
+        <aside class="area-rail" id="rail" aria-label="Decision and deliverable"></aside>
+        <div class="area-body" id="body"></div>
+      </div>
+    </section>
+  </main>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script src="/app.js"></script>
+</body>
 </html>
