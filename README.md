@@ -13,7 +13,7 @@ ContextCon 05, BITS Pilani. Own idea, adjacent to the Research and markets theme
 | Input | One plain-English request: problem, budget and competitors |
 | Finished work | A chosen lab with backups, evidence, competitor check, milestones, budget and draft agreement, delivered after approval |
 | Price | ₹50,000 per completed search. This is our assumption; we found no published per-search price |
-| Cost per job | Measured with Crustdata: 6.6 to 8.6 credits, about ₹178 to ₹232 at ₹27 a credit, capped at 14. ₹0 in data without a key |
+| Cost per job | Measured with Crustdata: 6.6 to 9.6 credits, about ₹178 to ₹259 at ₹27 a credit, capped at 14. ₹0 in data without a key |
 | Pass mark | Every reason traces to a dated record, weak evidence produces "cannot verify", and nothing is sent twice or without approval |
 
 ## Run it
@@ -42,10 +42,10 @@ Tests: `python3 -m unittest discover -s tests`
 See the [architecture diagram](docs/architecture.md).
 
 1. A local model turns the request into technical search language. Money and company names must appear in the
-   customer's own words.
+   customer's own words, and both are removed before search terms are written, so they cannot steer which lab wins.
 2. Crossref is searched live. A second pass adopts the field's vocabulary, and a third searches likely lab heads by name.
 3. Labs are ranked by code from five counts: on-topic papers, last-authored papers, recent papers, papers naming a
-   grant and papers with company co-authors. Weights are in `config.json`. Citations and prestige are not inputs.
+   grant and papers with company co-authors. Weights are in `config.json`. Each count earns diminishing credit, `n / (n + half)`. Citations and prestige are not inputs.
 4. Competitor links come from paper records and the live web. Crustdata resolves each competitor to one company,
    searches from the competitor's side and from each lab's side, and reads the most relevant pages. A link is
    **confirmed** only when one sentence or record states it. Anything weaker is a **lead**. The same pages show where
@@ -77,6 +77,9 @@ Every job has a ledger of calls, outcomes, tokens, time and Crustdata credits.
 | --- | --- |
 | Same name at two institutes | Kept as two people and flagged |
 | ORCID missing on some papers | Joined only by name **and** institution |
+| Competitor or budget changes | Same searches, so the same labs are considered |
+| Preprint and its published version | Counted as one paper |
+| Two labs within three points | "Close call: speak to both", not a false winner |
 | Publisher prints no affiliation | Joined only by the same ORCID or a shared co-author, and labelled |
 | Several companies with the competitor's name at full confidence | Not guessed. Retried with the sector, otherwise "cannot verify" |
 | Tag list or menu naming both parties | Ignored as evidence |
@@ -99,9 +102,12 @@ Every job has a ledger of calls, outcomes, tokens, time and Crustdata credits.
 - Live runs on 22 November 2026: low-clinker cement, sodium-ion batteries, textile dye removal, a vague request, a
   prompt injection, a nonsense subject, and cement again with the model switched off.
 - A live server was killed during screening and restarted. The six completed paper searches were not repeated.
-- Crustdata was run live on 22 November 2026 for low-clinker cement. Replaying the captured responses recovered four
+- Crustdata was run live on 22 November 2026 for low-clinker cement and sodium-ion batteries. An interrupted job
+  resumed without repeating a paid call. Replaying the captured responses recovered four
   publicly announced institute and company partnerships, with no false link among the five competitors and six
   institutes replayed. That is a small sample from one industry.
+- Eight variants of company names and budgets across two topics produced one search per topic. Two wordings of the
+  battery request produced the same first and second labs.
 
 ## Approaches considered
 
@@ -123,7 +129,8 @@ Every job has a ledger of calls, outcomes, tokens, time and Crustdata credits.
 - Without a Crustdata key, announcements are judged on headlines alone.
 - Web search results vary between runs, so a lead found once may not appear again. "None found" never means "none exists".
 - A link at institute level may involve a different department or topic. It is a question to ask, not a conflict.
-- Rewording a request can change the backup labs.
+- Rewording the technical problem can change the backup labs, and occasionally the first choice.
+- A live run with Crustdata takes about two to three minutes.
 - The agreement is a starting draft and needs a lawyer. The 20% overhead is a planning default from BITS Pilani's policy.
 - Researchers are ranked from public work records. No emails, phone numbers or protected traits are used.
 

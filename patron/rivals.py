@@ -6,7 +6,7 @@ lead:      both are mentioned, but no single passage states the link. Never trea
 import re
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 
 from . import crustdata, identity, papers
@@ -35,6 +35,9 @@ GENERIC = {"cement", "industries", "limited", "ltd", "batteries", "battery", "st
 def rival_names(rival):
     words = rival.split()
     names = [rival] + ([] if rival.lower().endswith("s") else [rival + "s"])
+    short = re.sub(r"[,.]?\s+(?:Ltd|Limited)\.?$", "", rival, flags=re.I)
+    if short != rival:
+        names.append(short)
     # 'UltraTech Cement' may be printed as 'UltraTech'. 'Tata Steel' must never shrink to 'Tata'.
     if len(words) == 2 and words[1].lower() in GENERIC and len(words[0]) >= 7:
         names.append(words[0])
@@ -62,8 +65,9 @@ def any_named(text, names):
 
 def sentences(text):
     # Search snippets join unrelated fragments with ellipses, bullets and pipes. Those are boundaries too.
-    parts = re.split(r"(?<=[.!?])\s+(?=[A-Z])|\n+|\.\.\.|\u2026|\s[\u00b7\u2022|]\s|;\s", text)
-    return [s.strip() for s in parts if s.strip()]
+    parts = re.split(r"(?<=[.!?])(?<!\bDr\.)(?<!\bMr\.)(?<!\bMs\.)(?<!\bMrs\.)(?<!\bProf\.)(?<!\bShri\.)(?<!\b[A-Z]\.)"
+                     r"\s+(?=[A-Z])|\n+|\.\.\.|\u2026|\s[\u00b7\u2022|]\s|;\s", text)
+    return [s for s in (part.strip(" .") for part in parts) if s]
 
 
 def read_passage(text, lab, rival):
@@ -148,7 +152,11 @@ def from_news(client, lab, rival, topic):
     return out[:2], []
 
 
-def snippet_day(snippet):
+def snippet_day(snippet, retrieved=None):
+    ago = re.match(r"\s*(\d{1,2}) (minute|hour|day|week)s? ago\b", snippet or "")
+    if ago and retrieved:
+        step = timedelta(**{ago.group(2) + "s": int(ago.group(1))})
+        return (datetime.fromisoformat(retrieved) - step).date().isoformat()
     found = re.match(r"\s*([A-Z][a-z]{2} \d{1,2}, \d{4})\b", snippet or "")
     try:
         return datetime.strptime(found.group(1), "%b %d, %Y").date().isoformat() if found else None
@@ -180,7 +188,7 @@ def resolve(client, brief, request=""):
     sector = next((w for w in SECTORS if mentions(request + " " + brief.get("problem", ""), w)), None)
     records, notes, keep, seen = [], [], [], set()
     for name in given:
-        match, asked = None, name
+        match, asked, matches = None, name, []
         try:
             matches, at = crustdata.identify(client, name)
             match = best_match(name, matches)
@@ -201,7 +209,9 @@ def resolve(client, brief, request=""):
             search = re.sub(r"[,.]? (?:Ltd|Limited)\.?$", "", match["name"])
         else:
             search = name
-            notes.append(f"Cannot verify which company '{name}' is. Searched by the name as given.")
+            could_be = ", ".join(dict.fromkeys(m["name"] for m in matches[:3] if m["name"]))
+            hint = f" It could be {could_be}. Give the full legal name to settle it." if could_be else ""
+            notes.append(f"Cannot verify which company '{name}' is.{hint} Searched by the name as given.")
         keep.append({"name": name, "search": search})
     return keep, records, notes
 
@@ -267,13 +277,21 @@ def worth_reading(searches, names, labs, topic, limit):
     return list(dict.fromkeys(url for _, _, url in ranked))[:limit]
 
 
+def page_text(content):
+    """Readable text with one line per block, so menus and bylines cannot join onto a sentence."""
+    content = re.sub(r"(?is)<(script|style|noscript|svg)\b.*?</\1>", " ", content or "")
+    blocks = re.split(r"(?i)</?(?:p|div|li|ul|ol|h[1-6]|br|td|tr|table|section|article|header|footer|nav|aside"
+                      r"|figure|figcaption|blockquote|time|button)\b[^>]*>", content)
+    return "\n".join(line for line in map(clean, blocks) if line)
+
+
 def web_documents(client, searches, urls):
     docs, notes = [], []
     for search in searches:
         for item in search["results"]:
             snippet = clean(re.sub(r"Read more$", "", item.get("snippet") or ""))
             docs.append({"source": "Crustdata web search", "field": "results[].title + snippet", "at": search["at"],
-                         "url": item.get("url") or "", "date": snippet_day(snippet), "search": search,
+                         "url": item.get("url") or "", "date": snippet_day(snippet, search["at"]), "search": search,
                          "text": f"{clean(item.get('title'))}. {snippet}"})
     if not urls:
         return docs, notes
@@ -283,7 +301,7 @@ def web_documents(client, searches, urls):
         return docs, [f"The most relevant announcement pages could not be read ({err})."]
     dates = {d["url"]: d["date"] for d in docs}
     for url, content in pages:
-        body = clean(re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", content or ""))
+        body = page_text(content)
         if len(body) < 400:
             notes.append("One announcement page could not be opened, so only its search snippet was used.")
             continue
@@ -342,7 +360,7 @@ def rival_ties(docs, names, topic):
     out = []
     for rival in names:
         own, seen = [], set()
-        for doc in docs:
+        for doc in sorted(docs, key=lambda d: not d["date"]):  # prefer the dated copy of a link
             if not topic & stems(doc["text"]):
                 continue
             for part in sentences(doc["text"]):

@@ -83,7 +83,7 @@ def institution(affiliation):
 
 
 NOT_IN_NAME = set("""department dept school faculty institute college centre center division laboratory science sciences
-chemistry physics engineering technology medicine biotechnology mathematics management studies research of""".split())
+chemistry physics engineering technology medicine biotechnology mathematics management studies research of and astrophysics""".split())
 
 
 def trim_university(part):

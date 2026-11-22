@@ -65,6 +65,29 @@ def named_rivals(text):
     return found
 
 
+def technical_text(request, names):
+    """The request with company names and money taken out, so neither can steer the search for labs."""
+    text = request
+    for name in sorted(filter(None, names), key=len, reverse=True):
+        text = re.sub(rf"(?<!\w){re.escape(name)}(?!\w)", "[company]", text, flags=re.I)
+
+    def hide_money(found):
+        symbol, _, unit = found.groups()
+        is_money = symbol or (unit or "").lower().startswith(("lakh", "lac", "crore"))
+        return " [budget] " if is_money else found.group(0)
+
+    text = MONEY.sub(hide_money, text)
+    kept = []
+    for part in re.split(r"(?<=[.!?;])\s+", text):
+        if "[company]" in part or "[budget]" in part:
+            rest = re.sub(r"\[company\]|\[budget\]", " ", part)
+            if len([w for w in fold(rest).split() if w not in STOP and len(w) > 1]) < 2:
+                continue  # the sentence said only who or how much
+            part = re.sub(r"\[company\](?:(?:\s*,\s*|\s+and\s+)\[company\])+", "[company]", part)
+        kept.append(" ".join(part.split()))
+    return " ".join(kept) or request
+
+
 def parse(client, request):
     out = llm.ask(client, "read request", SYSTEM, request, SCHEMA)
     notes = []
@@ -86,6 +109,16 @@ def parse(client, request):
     if len(rivals) > limit:
         notes.append(f"Only the first {limit} competitors are checked. Not checked: {', '.join(rivals[limit:])}.")
 
+    if out and out.get("has_research_problem"):
+        # Names are read from the whole request. Search language is read from the technical part alone.
+        neutral = technical_text(request, rivals + [company])
+        if neutral != request:
+            again = llm.ask(client, "read problem", SYSTEM, neutral, SCHEMA)
+            if again and again.get("search_phrases"):
+                out = {**out, **{k: again.get(k) for k in ("problem", "search_phrases", "essentials")}}
+            else:
+                notes.append("Search terms could not be separated from company names for this request.")
+
     phrases = list(dict.fromkeys(clean(p)[:120] for p in (out or {}).get("search_phrases", []) if clean(p)))[:4]
     names = set(fold(" ".join(rivals + [company or ""])).split())
     words = [w for w in fold(request).split() if w not in STOP and w not in names and not w.isdigit()]
@@ -100,7 +133,7 @@ def parse(client, request):
 
     essentials = []
     asked = stems(request)
-    for group in (out or {}).get("essentials", [])[:3]:
+    for group in ((out or {}).get("essentials") or [])[:3]:
         group = [clean(t) for t in group if isinstance(t, str) and fold(t)]
         if group and any(stems(t) <= asked for t in group):
             essentials.append(list(dict.fromkeys(group))[:6])
