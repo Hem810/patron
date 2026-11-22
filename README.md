@@ -1,5 +1,7 @@
 # Patron: the research sponsorship desk
 
+**[Watch the two-minute demo](https://drive.google.com/file/d/1VqcS6d-Ne6z9C1qIyMOKiM32OPB3fVZq/view?usp=share_link)**
+
 **A company says what research it needs. Patron decides which professor and lab to fund, shows the evidence, checks
 whether a competitor is already there, drafts the proposal and agreement, and sends it once after a person approves.**
 
