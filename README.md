@@ -14,7 +14,7 @@ ContextCon 05, BITS Pilani. Own idea, adjacent to the Research and markets theme
 | Finished work | A chosen lab with backups, evidence, competitor check, milestones, budget and draft agreement, delivered after approval |
 | Price | ₹50,000 per completed search. This is our assumption; we found no published per-search price |
 | Cost per job | Measured with Crustdata: 6.6 to 9.6 credits, about ₹178 to ₹259 at ₹27 a credit, capped at 14. ₹0 in data without a key |
-| Pass mark | Every reason traces to a dated record, weak evidence produces "cannot verify", and nothing is sent twice or without approval |
+| Pass mark | Every reason links to its record, with the date where the source gives one; weak evidence produces "cannot verify" or a lead; nothing is sent twice or without approval |
 
 ## Run it
 
@@ -43,13 +43,16 @@ See the [architecture diagram](docs/architecture.md).
 
 1. A local model turns the request into technical search language. Money and company names must appear in the
    customer's own words, and both are removed before search terms are written, so they cannot steer which lab wins.
+   An amount that is ambiguous, a range or not in rupees is left open, with a note asking for one figure.
 2. Crossref is searched live. A second pass adopts the field's vocabulary, and a third searches likely lab heads by name.
 3. Labs are ranked by code from five counts: on-topic papers, last-authored papers, recent papers, papers naming a
    grant and papers with company co-authors. Weights are in `config.json`. Each count earns diminishing credit, `n / (n + half)`. Citations and prestige are not inputs.
 4. Competitor links come from paper records and the live web. Crustdata resolves each competitor to one company,
    searches from the competitor's side and from each lab's side, and reads the most relevant pages. A link is
-   **confirmed** only when one sentence or record states it. Anything weaker is a **lead**. The same pages show where
-   competitors already do research, and industry ties the customer did not name.
+   **confirmed** only when a paper record states it, or when one sentence passes wording rules and the local model
+   agrees. The model can only downgrade: it never creates a link, and with no model no sentence is confirmed.
+   A company that cannot be identified is never confirmed. The same pages show where competitors already do research,
+   and industry ties the customer did not name.
 5. A direct link between the professor and a competitor moves that lab to "ask first". It is never presented as proof
    of wrongdoing.
 
@@ -60,7 +63,7 @@ See the [architecture diagram](docs/architecture.md).
 | [Crossref REST API](https://api.crossref.org) | Papers, affiliations, ORCID, funders, retractions, co-authorship | None |
 | [Crustdata](https://docs.crustdata.com) company identify, web search, web fetch | One company under two names, announced partnerships | Optional, recommended |
 | Google News RSS | Headline-only fallback for announcements | None |
-| Ollama, Gemma | Search terms and title relevance. Never facts, scores, money or the decision | Local |
+| Ollama, Gemma | Search terms, title relevance, company names quoted from the request, and a veto on competitor-link sentences. Never money, scores or the decision | Local |
 
 Each paper shows its record link, exact field, printed passage, publication date, retrieval time and record hash.
 Every job has a ledger of calls, outcomes, tokens, time and Crustdata credits.
@@ -68,7 +71,8 @@ Every job has a ledger of calls, outcomes, tokens, time and Crustdata credits.
 ## Where a person steps in
 
 - A request with no research problem gets one question back.
-- A person approves or rejects the exact packet, identified by its hash. Changing the lab changes the hash.
+- A person approves or rejects the exact packet, identified by its hash. The hash covers the document that is sent,
+  including the agreement wording, the recipient and the terms. Any change needs a new approval.
 - Delivery writes an `.eml` file to `data/outbox`, addressed to a `.invalid` domain. No real person is contacted.
 
 ## Hard cases
@@ -80,23 +84,29 @@ Every job has a ledger of calls, outcomes, tokens, time and Crustdata credits.
 | Competitor or budget changes | Same searches, so the same labs are considered |
 | Preprint and its published version | Counted as one paper |
 | Two labs within three points | "Close call: speak to both", not a false winner |
-| Publisher prints no affiliation | Joined only by the same ORCID or a shared co-author, and labelled |
-| Several companies with the competitor's name at full confidence | Not guessed. Retried with the sector, otherwise "cannot verify" |
+| Publisher prints no affiliation | Joined only by the same ORCID or a shared co-author, and labelled. A different ORCID is never joined |
+| Several companies share the competitor's name, or one merely contains it | Not guessed. Retried with the sector, otherwise "cannot verify" and no confirmed link |
 | Tag list or menu naming both parties | Ignored as evidence |
 | Lookalike names such as JK Cement and JK Lakshmi Cement | Whole-name match, so they are not mixed |
-| Article mentions both parties without stating a link | Lead, not a fact |
+| Article mentions both parties, or a link that is sought, over, or with someone else | Lead, not a fact |
+| Undated link | Shown as possibly historical, and cannot change the chosen lab |
+| Turnover, unit costs or tonnage next to the budget | Not read as the budget |
 | Retracted paper | Excluded and reported |
 | A subject nobody publishes on | "Cannot verify", and names the missing subject |
 | Paper index down | Job fails as an outage. It is never reported as "no labs" |
-| Announcement search down | "Not checked", never "none found" |
+| A competitor or lab web search fails | "Not checked", never "none found" |
 | Killed mid-run | Resumes from the last checkpoint |
 | Killed after writing the email, before recording it | Still one email |
-| Paid call with unknown outcome | Not repeated |
+| Paid call with unknown outcome, including 408 and 5xx | Not repeated |
 | Same request twice in a day | Opens the existing job |
 | Instructions hidden in a request or title | Cannot set scores, approval or delivery, which are all handled by code |
 
 ## How we tested it
 
+- An adversarial audit found defects in budget reading, link wording, company identity, approval and paid retries.
+  Each now has a regression test in `tests/test_regressions.py`.
+- The link check was scored on 19 sentences it was not tuned on: wording rules alone confirmed 7 false links, rules
+  plus the model veto 1. It is a small synthetic set. On 7 real announcement sentences all 7 were confirmed.
 - Offline tests with synthetic records cover identity, ranking, money, competitor wording, approval, outages and a
   real `SIGKILL` during delivery.
 - Live runs on 22 November 2026: low-clinker cement, sodium-ion batteries, textile dye removal, a vague request, a
@@ -128,6 +138,11 @@ Every job has a ledger of calls, outcomes, tokens, time and Crustdata credits.
 - Institution names are normalised for major Indian institutes and approximate for others.
 - Without a Crustdata key, announcements are judged on headlines alone.
 - Web search results vary between runs, so a lead found once may not appear again. "None found" never means "none exists".
+- The link check can still be wrong: it confirmed 1 false link in that 19-sentence test. Read the quote before acting.
+- Without a Crustdata key, company identity is not checked and confirmed links rely on the name as printed.
+- A lab's reply is not yet recorded by the product. `patron/handoff.py` holds the tested rules, but no command or
+  screen calls it.
+- The runner needs `fcntl`, so it does not run on native Windows. Use macOS, Linux or WSL.
 - A link at institute level may involve a different department or topic. It is a question to ask, not a conflict.
 - Rewording the technical problem can change the backup labs, and occasionally the first choice.
 - A live run with Crustdata takes about two to three minutes.

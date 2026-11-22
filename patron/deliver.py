@@ -8,7 +8,7 @@ from . import config, packet as packets, store
 from .text import digest, now
 
 
-def send(job, packet, approval, cfg):
+def send(job, packet, approval):
     key = digest(["send", job, packet["sha"]])
     if store.one("select 1 from actions where key=?", key):
         return key
@@ -18,12 +18,12 @@ def send(job, packet, approval, cfg):
     if not target.exists():
         msg = EmailMessage()
         msg["From"] = "patron@sandbox.invalid"
-        msg["To"] = cfg["sandbox_recipient"]
-        msg["Subject"] = f"Research sponsorship proposal for {packet['lab']['institution']}"
+        msg["To"] = packet["email"]["to"]
+        msg["Subject"] = packet["email"]["subject"]
         msg["Date"] = format_datetime(datetime.fromisoformat(approval["at"]))
         msg["Message-ID"] = f"<{key}@sandbox.invalid>"
-        msg.set_content(f"The proposal and draft agreement are attached. Approved by {approval['approver']}.\n")
-        msg.add_attachment(packets.render(packet).encode(), maintype="text", subtype="html", filename="proposal.html")
+        msg.set_content(f"{packet['email']['text']} Approved by {approval['approver']}.\n")
+        msg.add_attachment(packets.render(packet), subtype="html", filename="proposal.html")  # str, so UTF-8 is declared
         temp = target.with_suffix(".tmp")
         with open(temp, "wb") as fh:
             fh.write(bytes(msg))

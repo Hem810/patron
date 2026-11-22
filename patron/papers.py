@@ -118,8 +118,9 @@ def attribute(lab, known, fetched):
     name = fold(lab["name"])
 
     def me(author):
-        return bool(lab["orcid"] and author["orcid"] == lab["orcid"]) or (
-            identity.name_key(author["given"], author["family"]) == name)
+        if lab["orcid"] and author["orcid"]:
+            return author["orcid"] == lab["orcid"]  # two different ORCIDs are two people, whatever the name
+        return identity.name_key(author["given"], author["family"]) == name
 
     def coauthors(paper):
         return {identity.name_key(a["given"], a["family"]): f"{a['given']} {a['family']}" for a in paper["authors"]

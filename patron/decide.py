@@ -62,7 +62,10 @@ def decide(ranked, rival_check, cfg, chosen_key=None):
             continue
         verb = "has a public link to" if link["strength"] == "confirmed" else "came up in an unconfirmed search match with"
         who = pick["name"] if link["scope"] == "person" else pick["institution"]
-        questions.append(f"{who} {verb} {link['rival']}. Ask about active projects, overlap and confidentiality.")
+        day = link.get("date")
+        when = (" (undated, so it may be historical)" if not day else
+                f" ({day}, historical)" if day[:4] < since else f" ({day})")
+        questions.append(f"{who} {verb} {link['rival']}{when}. Ask about active projects, overlap and confidentiality.")
     if any(x["lab"] == pick["key"] for x in rival_check.get("industry", [])):
         questions.append(f"{pick['institution']} has other reported industry work. "
                          "Ask whether it overlaps this problem, who funds it and who owns the results.")

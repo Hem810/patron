@@ -1,13 +1,15 @@
 """Durable job runner. Every stage is checkpointed, so a killed process continues where it stopped."""
 import fcntl
+import re
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import date
 
 from . import config, crustdata, decide, deliver, intake, packet, papers, rank, rivals, store
 from .net import Client, SourceError
-from .text import clean, digest, fold, now
+from .text import clean, digest, now
 
 STAGES = ["brief", "discover", "screen", "deepen", "rank", "rivals", "packet"]
 LIMITS = [
@@ -22,11 +24,17 @@ class Refused(Exception):
     pass
 
 
+def same_request(text):
+    """Forgive case, spacing and punctuation. Keep what changes meaning: currency, decimal points and plus signs."""
+    text = re.sub(r"(?<!\d)\.|\.(?!\d)", " ", text.lower())
+    return " ".join(re.sub(r"[^\w$₹€£.+]+", " ", text).split())
+
+
 def submit(text, fresh=False):
     text = clean(text)[:4000]
     if not text:
         raise Refused("Describe the research you want to fund.")
-    key = digest([fold(text), date.today().isoformat()])
+    key = digest([same_request(text), date.today().isoformat()])
     with store.db() as c:
         c.execute("begin immediate")
         old = c.execute("select id from jobs where request_key=? and status not in ('rejected','failed') "
@@ -39,15 +47,21 @@ def submit(text, fresh=False):
 
 
 @contextmanager
-def locked(job):
+def locked(job, wait=0):
+    """One writer per job. wait=None waits as long as it takes; a killed holder releases the lock."""
     folder = config.data_dir() / "locks"
     folder.mkdir(exist_ok=True)
+    until = None if wait is None else time.monotonic() + wait
     with open(folder / f"{job}.lock", "w") as fh:
-        try:
-            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            yield False
-            return
+        while True:
+            try:
+                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if until is not None and time.monotonic() >= until:
+                    yield False
+                    return
+                time.sleep(0.05)
         yield True
 
 
@@ -61,9 +75,9 @@ def checkpoint(job, name, work):
 
 
 def run(job):
-    with locked(job) as mine:
-        if mine:
-            _run(job)
+    # Wait, rather than give up: the holder may be about to finish, and this call may carry an approval.
+    with locked(job, wait=None):
+        _run(job)
 
 
 def _run(job):
@@ -74,7 +88,7 @@ def _run(job):
     early = None
     try:
         if row["status"] == "approved":
-            return finish(job, cfg)
+            return finish(job)
         client = Client(job, cfg)
         brief = checkpoint(job, "brief", lambda: intake.parse(client, row["request"]))
         if not brief["clear"]:
@@ -88,19 +102,24 @@ def _run(job):
         ranked = checkpoint(job, "rank", lambda: rank.rank(
             deeper["papers"], deeper, cfg, essentials=brief["essentials"]))
         if not ranked["labs"]:
-            reason = "Cannot verify a suitable lab. No researcher had enough on-topic, lab-leading evidence"
+            bar = cfg["ranking"]
+            reason = (f"Cannot verify a suitable lab. No researcher had at least {bar['min_papers']} on-topic papers, "
+                      f"including {bar['min_lead_papers']} as last author")
             if ranked["uncovered"]:
                 reason += f". Not evidenced: {', '.join(ranked['uncovered'])}"
+            if deeper.get("retracted"):
+                reason += f". Excluded {len(deeper['retracted'])} retracted paper(s)"
             return store.set_status(job, "insufficient", reason + ". Nothing was drafted.")
         if early:
             early.join()  # the same paid calls must never be in flight twice
         checkpoint(job, "rivals", lambda: rivals.check(client, brief, {**deeper, "phrases": found["phrases"]}, ranked, row["request"]))
         checkpoint(job, "packet", lambda: make_packet(job, cfg))
         store.set_status(job, "awaiting_approval", "")
-    except SourceError as err:
-        store.set_status(job, "failed", str(err))
     except Exception as err:
-        store.set_status(job, "failed", f"Stopped safely: {type(err).__name__}: {err}")
+        if early:
+            early.join()  # before "failed" shows, or an immediate retry would find the job still busy
+        outage = isinstance(err, SourceError)
+        store.set_status(job, "failed", str(err) if outage else f"Stopped safely: {type(err).__name__}: {err}")
     finally:
         if early:
             early.join()
@@ -131,12 +150,12 @@ def make_packet(job, cfg, chosen=None):
     return packet.build(step["brief"], step["rank"], step["rivals"], decision, cfg, unknowns)
 
 
-def finish(job, cfg):
+def finish(job):
     current = store.get_step(job, "packet")
     approval = store.one("select * from approvals where job=? and decision='approve' order by id desc", job)
-    if not approval or approval["packet_sha"] != current["sha"]:
+    if not approval or approval["packet_sha"] != current["sha"] or not packet.sealed(current):
         return store.set_status(job, "awaiting_approval", "The packet changed, so it needs a new approval.")
-    deliver.send(job, current, approval, cfg)
+    deliver.send(job, current, approval)
     store.set_status(job, "sent", "Written once to the sandbox outbox. No real person was contacted.")
 
 
@@ -144,24 +163,30 @@ def review(job, decision, sha, approver):
     approver = clean(approver)[:80]
     if not approver:
         raise Refused("Enter the name of the person deciding.")
-    with store.db() as c:
-        c.execute("begin immediate")
-        row = c.execute("select status from jobs where id=?", (job,)).fetchone()
-        saved = c.execute("select output from steps where job=? and name='packet'", (job,)).fetchone()
+    with locked(job, wait=5) as mine:
+        if not mine:
+            raise Refused("This job is busy. Try again in a moment.")
+        row = store.one("select status from jobs where id=?", job)
+        saved = store.get_step(job, "packet")
         if not row or not saved or row["status"] != "awaiting_approval":
             raise Refused("This job is not waiting for a decision.")
-        if f'"sha": "{sha}"' not in saved["output"]:
+        if saved["sha"] != sha:
             raise Refused("The packet changed. Read it again before deciding.")
-        c.execute("insert into approvals(job,packet_sha,decision,approver,at) values(?,?,?,?,?)",
-                  (job, sha, decision, approver, now()))
-        c.execute("update jobs set status=?, message='', updated=? where id=?",
-                  ("approved" if decision == "approve" else "rejected", now(), job))
+        if decision == "approve" and not packet.sealed(saved):
+            raise Refused("This packet is altered or from an older version. Run the request again.")
+        with store.db() as c:
+            c.execute("insert into approvals(job,packet_sha,decision,approver,at) values(?,?,?,?,?)",
+                      (job, sha, decision, approver, now()))
+            c.execute("update jobs set status=?, message='', updated=? where id=?",
+                      ("approved" if decision == "approve" else "rejected", now(), job))
 
 
 def choose(job, key):
-    with locked(job) as mine:
+    with locked(job, wait=5) as mine:
+        if not mine:
+            raise Refused("This job is busy. Try again in a moment.")
         row = store.one("select status from jobs where id=?", job)
-        if not mine or not row or row["status"] != "awaiting_approval":
+        if not row or row["status"] != "awaiting_approval":
             raise Refused("A lab can only be changed before approval.")
         cfg = config.load()
         labs = store.get_step(job, "rank")["labs"][: cfg["rivals"]["labs_checked"]]
@@ -171,9 +196,11 @@ def choose(job, key):
 
 
 def retry(job):
-    with locked(job) as mine:
+    with locked(job, wait=5) as mine:
+        if not mine:
+            raise Refused("This job is still stopping. Try again in a moment.")
         row = store.one("select status from jobs where id=?", job)
-        if not mine or not row or row["status"] != "failed":
+        if not row or row["status"] != "failed":
             raise Refused("Only a failed job can be retried.")
         store.set_status(job, "queued")
 
