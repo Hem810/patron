@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Patron · research sponsorship desk</title>
+<link rel="stylesheet" href="/app.css">
+<header>
+  <a class="brand" href="/">Patron</a>
+  <span>Which professor should your company fund? One request in, a signed-off proposal out.</span>
+</header>
+<main>
+  <form id="ask">
+    <label for="request">What research does your company need?</label>
+    <textarea id="request" rows="3" required maxlength="4000"
+      placeholder="Who you are, the technical problem, your budget in rupees and your competitors."></textarea>
+    <div class="row">
+      <button>Find the lab to fund</button>
+      <label class="small"><input id="fresh" type="checkbox"> run again even if it is a repeat</label>
+      <span id="note" role="status"></span>
+    </div>
+  </form>
+  <div id="state" role="status"></div>
+  <div class="layout">
+    <section id="result"></section>
+    <aside id="side"></aside>
+  </div>
+</main>
+<script src="/app.js"></script>
+</html>

@@ -1,0 +1,29 @@
+{
+  "country": "India",
+  "years": 5,
+  "limits": {"seconds": 240, "credits": 14, "http_calls": 90},
+  "llm": {"url": "http://localhost:11434/api/chat", "model": "gemma4:latest", "timeout": 60},
+  "discovery": {"rows_per_query": 100, "screen_max": 150, "screen_batch": 30, "deep_searches": 8},
+  "ranking": {
+    "min_papers": 2,
+    "min_lead_papers": 1,
+    "recent_years": 2,
+    "weights": {"fit": 35, "lead": 25, "recent": 20, "grants": 10, "industry": 10},
+    "saturate": {"fit": 6, "lead": 4, "recent": 3, "grants": 2, "industry": 1}
+  },
+  "rivals": {"labs_checked": 3, "max_rivals": 3, "max_page_fetches": 3},
+  "agreement": {
+    "overhead_pct_on_research": 20,
+    "overhead_basis": "BITS Pilani overhead guideline of April 2024 (minimum 20%), used as a planning default. Confirm with the selected institute.",
+    "overhead_url": "https://bits-pilani.ac.in/wp-content/uploads/Overhead-distribution-policy_01-April-24.pdf",
+    "publication_review_days": 60,
+    "milestones": [
+      {"month": 0, "pct": 25, "deliverable": "Signed agreement, baseline protocol and named project team"},
+      {"month": 4, "pct": 30, "deliverable": "Baseline results and raw data, reviewed by the sponsor"},
+      {"month": 8, "pct": 25, "deliverable": "Prototype or method validated against the agreed target"},
+      {"month": 12, "pct": 20, "deliverable": "Final report, invention disclosure and handover"}
+    ]
+  },
+  "pricing": {"price_per_job_inr": 50000, "inr_per_credit": 27, "credit_basis": "15,000 event credits are advertised as worth USD 4,500; INR 90 per USD is assumed"},
+  "sandbox_recipient": "research-office@sandbox.invalid"
+}
